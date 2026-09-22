@@ -87,13 +87,26 @@ const Login = () => {
 
   return (
     <Container maxWidth="sm">
-      <Card sx={{ mt: 10 }}>
+      <Card
+        sx={{
+          mt: 10,
+          borderTop: "6px solid #2E7D32",
+        }}
+      >
         <CardContent sx={{ p: 4 }}>
           <Typography
             variant="h4"
             gutterBottom
           >
             KoalaTech University
+          </Typography>
+
+          <Typography
+            color="secondary.main"
+            fontWeight={600}
+            sx={{ mb: 1 }}
+          >
+            Version 2.0 — Deployed automatically via CI/CD
           </Typography>
 
           <Typography
