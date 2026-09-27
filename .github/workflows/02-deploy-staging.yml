@@ -31,11 +31,54 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Ensure Terraform state storage
+        run: bash terraform/bootstrap-state.sh
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -input=false
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -input=false -auto-approve
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
+      - name: Read Terraform outputs
+        working-directory: terraform
+        run: |
+          echo "AKS_RESOURCE_GROUP=$(terraform output -raw resource_group_name)" >> "$GITHUB_ENV"
+          echo "AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)" >> "$GITHUB_ENV"
+          echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> "$GITHUB_ENV"
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
-            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER_NAME }} \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
             --overwrite-existing
 
       - name: Create staging namespace
@@ -75,37 +118,37 @@ jobs:
       - name: Update frontend image
         run: |
           kubectl set image deployment/frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ github.event.workflow_run.head_sha }} \
+            frontend=${{ env.ACR_LOGIN_SERVER }}/koalatech-frontend:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Update user-service image
         run: |
           kubectl set image deployment/user-service \
-            user-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ github.event.workflow_run.head_sha }} \
+            user-service=${{ env.ACR_LOGIN_SERVER }}/koalatech-user-service:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Update student-service image
         run: |
           kubectl set image deployment/student-service \
-            student-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ github.event.workflow_run.head_sha }} \
+            student-service=${{ env.ACR_LOGIN_SERVER }}/koalatech-student-service:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Update lecturer-service image
         run: |
           kubectl set image deployment/lecturer-service \
-            lecturer-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ github.event.workflow_run.head_sha }} \
+            lecturer-service=${{ env.ACR_LOGIN_SERVER }}/koalatech-lecturer-service:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Update course-service image
         run: |
           kubectl set image deployment/course-service \
-            course-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ github.event.workflow_run.head_sha }} \
+            course-service=${{ env.ACR_LOGIN_SERVER }}/koalatech-course-service:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Update enrollment-service image
         run: |
           kubectl set image deployment/enrollment-service \
-            enrollment-service=${{ vars.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ github.event.workflow_run.head_sha }} \
+            enrollment-service=${{ env.ACR_LOGIN_SERVER }}/koalatech-enrollment-service:${{ github.event.workflow_run.head_sha }} \
             -n staging
 
       - name: Wait for frontend rollout
@@ -149,3 +192,17 @@ jobs:
           kubectl get pods -n staging
           kubectl get services -n staging
           kubectl get pvc -n staging
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Deploy Prometheus and Grafana
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --wait \
+            --timeout 15m
+          kubectl get pods -n monitoring

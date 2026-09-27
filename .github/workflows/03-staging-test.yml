@@ -21,16 +21,49 @@ jobs:
       name: staging
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: Login to Azure
         uses: azure/login@v3
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Ensure Terraform state storage
+        run: bash terraform/bootstrap-state.sh
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -input=false
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
+      - name: Read Terraform outputs
+        working-directory: terraform
+        run: |
+          echo "AKS_RESOURCE_GROUP=$(terraform output -raw resource_group_name)" >> "$GITHUB_ENV"
+          echo "AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)" >> "$GITHUB_ENV"
+        env:
+          ARM_CLIENT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          ARM_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
+          ARM_SUBSCRIPTION_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          ARM_TENANT_ID: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
-            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER_NAME }} \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
             --overwrite-existing
 
       - name: Wait for staging frontend IP
